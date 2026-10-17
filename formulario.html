@@ -55,6 +55,8 @@ textarea{ min-height:76px; resize:vertical; }
 .bad input, .bad select, .bad textarea{ border-color:var(--warn); box-shadow:inset 0 0 0 1px var(--warn); }
 .msg{ color:var(--warn); font-size:14px; margin-top:5px; }
 .hint{ color:var(--muted); font-size:13.5px; margin-top:5px; }
+.consulta{ display:flex; flex-direction:column; gap:8px; align-items:stretch; background:var(--soft); border-radius:10px; padding:12px; margin:-6px 0 16px; font-size:13.5px; color:var(--muted); }
+.consulta .btn{ width:100%; }
 .f label.consent{ font-weight:400; }
 .consent{ display:flex; gap:12px; align-items:flex-start; background:var(--soft); border-radius:10px; padding:12px; font-size:14px; color:var(--muted); }
 .consent input{ width:22px; height:22px; flex:none; margin-top:2px; accent-color:var(--ok); }
@@ -175,17 +177,26 @@ details summary{ cursor:pointer; font-weight:600; padding:6px 0; }
         <input type="text" id="barrio" list="barrios" autocomplete="off" maxlength="80">
         <datalist id="barrios"></datalist>
       </div>
-      <div class="row2">
+      <div class="consulta">
+        <span id="consultaTxt">¿No sabe dónde vota? Consúltelo en la Registraduría y elíjalo abajo.</span>
+        <button class="btn sm ghost" type="button" id="consultaBtn">Consultar mi puesto</button>
+      </div>
+      <div class="f" data-f="zona">
+        <label for="zona">¿Dónde vota? <small>comuna o corregimiento del puesto</small></label>
+        <select id="zona"></select>
+      </div>
+      <div class="row2" id="puestoRow" hidden>
         <div class="f" data-f="puesto">
           <label for="puesto">Puesto de votación</label>
-          <input type="text" id="puesto" list="puestos" autocomplete="off" maxlength="120">
-          <datalist id="puestos"></datalist>
+          <select id="puesto"></select>
+          <input type="text" id="puestoTxt" autocomplete="off" maxlength="120" placeholder="Puesto y municipio" hidden aria-label="Puesto y municipio">
         </div>
         <div class="f" data-f="mesa">
           <label for="mesa">Mesa</label>
           <input type="tel" id="mesa" inputmode="numeric" autocomplete="off" maxlength="4">
         </div>
       </div>
+      <p class="hint" id="puestoInfo" hidden style="margin:-8px 0 16px"></p>
       <div data-only="lider">
         <div class="f" data-f="categoria">
           <label for="categoria">Categoría</label>
@@ -216,7 +227,7 @@ details summary{ cursor:pointer; font-weight:600; padding:6px 0; }
   <section id="thanksView" hidden>
     <div class="card thanks">
       <div class="big" id="thanksName"></div>
-      <p>Su registro quedó guardado. Pronto lo contactaremos con la información para el día de elecciones.</p>
+      <p id="thanksMsg">Su registro quedó guardado. Pronto lo contactaremos con la información para el día de elecciones.</p>
       <button class="btn ghost" id="again" type="button">Registrar a otra persona</button>
     </div>
   </section>
@@ -302,10 +313,51 @@ function fillForm(){
   const fuera = otros.filter(c => /fuera/i.test(c)), corr = otros.filter(c => !/fuera/i.test(c));
   $('comuna').innerHTML = '<option value="">Elija una opción</option>' + `<optgroup label="Comunas">${opts(com)}</optgroup>` +
     (corr.length ? `<optgroup label="Corregimientos">${opts(corr)}</optgroup>` : '') + (fuera.length ? `<optgroup label="Otros">${opts(fuera)}</optgroup>` : '');
-  $('puestos').innerHTML = CAT.puestos.map(p => `<option value="${esc(p)}">`).join('');
+  fillZonas();
   $('barrios').innerHTML = CAT.barrios.map(p => `<option value="${esc(p)}">`).join('');
   $('autText').textContent = CAT.autorizacion;
 }
+/* ---------- Puesto de votación (DIVIPOLE) ---------- */
+const FUERA = 'Fuera de Cali', SIN_COMUNA = 'Cali (sin comuna)';
+function zonaDe(p){ return p[2] || SIN_COMUNA; }
+function fillZonas(){
+  const zonas = [...new Set(CAT.puestos.map(zonaDe))];
+  const com = zonas.filter(z => /^comuna \d+$/i.test(z)).sort((a,b) => parseInt(a.slice(7)) - parseInt(b.slice(7)));
+  const corr = zonas.filter(z => !/^comuna \d+$/i.test(z) && z !== SIN_COMUNA).sort((a,b) => a.localeCompare(b,'es'));
+  $('zona').innerHTML = '<option value="">No sabe todavía</option>' + `<optgroup label="Comunas">${opts(com)}</optgroup>` +
+    `<optgroup label="Corregimientos">${opts(corr)}</optgroup>` + `<optgroup label="Otros">${zonas.includes(SIN_COMUNA) ? `<option value="${SIN_COMUNA}">Otros puestos de Cali</option>` : ''}<option>${FUERA}</option></optgroup>`;
+  onZona();
+}
+function onZona(){
+  const z = $('zona').value, fuera = z === FUERA;
+  $('puestoRow').hidden = !z;
+  $('puesto').hidden = fuera; $('puestoTxt').hidden = !fuera;
+  $('puestoInfo').hidden = true; $('mesa').value = '';
+  if (z && !fuera){
+    const list = CAT.puestos.filter(p => zonaDe(p) === z).sort((a,b) => a[1].localeCompare(b[1],'es'));
+    $('puesto').innerHTML = '<option value="">Elija el puesto</option>' + list.map(p => `<option value="${esc(p[1])}">${esc(p[1])}</option>`).join('');
+  }
+}
+function puestoSel(){ return CAT.puestos.find(p => p[1] === $('puesto').value) || null; }
+function onPuesto(){
+  const p = puestoSel();
+  $('puestoInfo').hidden = !p;
+  if (p) $('puestoInfo').textContent = `Mesas de la 1 a la ${p[3]}.`;
+}
+$('zona').addEventListener('change', onZona);
+// Abre la consulta oficial en otra pestaña y copia la cédula para pegarla allá.
+const URL_REGISTRADURIA = 'https://consultacenso.registraduria.gov.co/';
+$('consultaBtn').onclick = async () => {
+  const ced = $('cedula').value.replace(/\D/g,'');
+  window.open(URL_REGISTRADURIA, '_blank', 'noopener');
+  let copiada = false;
+  if (ced){ try { await navigator.clipboard.writeText(ced); copiada = true; } catch(e){} }
+  $('consultaTxt').textContent = ced
+    ? (copiada ? `Cédula ${ced} copiada: péguela en la Registraduría, vea el puesto y la mesa, y vuelva aquí para elegirlos.` : `Escriba la cédula ${ced} en la Registraduría, vea el puesto y la mesa, y vuelva aquí para elegirlos.`)
+    : 'Escriba la cédula en la Registraduría, vea el puesto y la mesa, y vuelva aquí para elegirlos.';
+};
+$('puesto').addEventListener('change', onPuesto);
+
 function setErr(field, msg){
   document.querySelectorAll('.f.bad').forEach(f => { f.classList.remove('bad'); const m = f.querySelector('.msg'); if (m) m.remove(); });
   document.querySelectorAll('[aria-invalid]').forEach(x => x.removeAttribute('aria-invalid'));
@@ -321,11 +373,14 @@ function validate(d){
   if (MODE === 'auto' && !t) return ['celular','Escriba su número de celular.'];
   if (t && !/^(3\d{9}|60\d{8})$/.test(t)) return ['celular','El celular debe tener 10 números y empezar por 3.'];
   if (!d.comuna) return ['comuna','Elija la comuna o corregimiento.'];
+  if (d.zona && !d.fueraDeCali && !d.puesto) return ['puesto','Elija el puesto de votación.'];
+  if (d.mesa){ const p = puestoSel(); if (p && (+d.mesa < 1 || +d.mesa > p[3])) return ['mesa', `Ese puesto tiene mesas de la 1 a la ${p[3]}.`]; }
   if (!d.autoriza) return ['autoriza','Marque la autorización. Sin ella no se puede registrar.'];
   return null;
 }
 function resetForm(){
-  ['nombre','cedula','celular','barrio','mesa','observaciones'].forEach(id => $(id).value = '');
+  ['nombre','cedula','celular','barrio','mesa','observaciones','puestoTxt'].forEach(id => $(id).value = '');
+  $('zona').value = ''; onZona();
   $('autoriza').checked = false;
   if (MODE === 'lider' && CAT.estadosAlRegistrar) $('estado').value = CAT.estadosAlRegistrar[0];
 }
@@ -333,7 +388,8 @@ $('vForm').addEventListener('submit', e => {
   e.preventDefault();
   $('formErr').hidden = true; $('done').hidden = true;
   const d = { nombre:$('nombre').value.trim().replace(/\s+/g,' '), cedula:$('cedula').value, celular:$('celular').value, comuna:$('comuna').value,
-    barrio:$('barrio').value, puesto:$('puesto').value, mesa:$('mesa').value, categoria:$('categoria').value, estado:$('estado').value,
+    barrio:$('barrio').value, zona:$('zona').value, fueraDeCali:$('zona').value === FUERA,
+    puesto:$('zona').value === FUERA ? $('puestoTxt').value.trim() : ($('zona').value ? $('puesto').value : ''), mesa:$('zona').value ? $('mesa').value : '', categoria:$('categoria').value, estado:$('estado').value,
     observaciones:$('observaciones').value, autoriza:$('autoriza').checked };
   const bad = validate(d);
   if (bad){ setErr(bad[0], bad[1]); return; }
@@ -349,13 +405,20 @@ $('vForm').addEventListener('submit', e => {
       return;
     }
     resetForm();
+    const lista = a => a.length < 2 ? a.join('') : a.slice(0,-1).join(', ') + ' y ' + a[a.length-1];
     if (MODE === 'auto'){
       $('thanksName').textContent = '¡Gracias, ' + res.nombre.split(' ')[0] + '!';
+      $('thanksMsg').textContent = !res.existente ? 'Su registro quedó guardado. Pronto lo contactaremos con la información para el día de elecciones.'
+        : res.cambios.length ? 'Usted ya estaba registrado. Actualizamos sus datos.' : 'Usted ya estaba registrado y sus datos están al día.';
       show('thanksView'); window.scrollTo({top:0});
       return;
     }
     mineStale = true;
-    $('done').innerHTML = `<b>${esc(res.nombre)} quedó registrado.</b>Puede registrar a la siguiente persona.`;
+    let html;
+    if (!res.existente) html = `<b>${esc(res.nombre)} quedó registrado.</b>Puede registrar a la siguiente persona.`;
+    else if (res.propio) html = `<b>${esc(res.nombre)} ya estaba registrado.</b>` + (res.cambios.length ? `Se actualizó: ${esc(lista(res.cambios))}.` : 'Los datos eran iguales; no hubo cambios.');
+    else html = `<b>${esc(res.nombre)} ya está registrado con otro líder.</b>` + (res.cambios.length ? `Se completó: ${esc(lista(res.cambios))}. ` : 'No se cambió nada. ') + 'Si debe quedar a su nombre, avise al coordinador.';
+    $('done').innerHTML = html;
     $('done').hidden = false;
     $('liderCount').textContent = fmt.format(res.total);
     window.scrollTo({top:0, behavior:'smooth'});
